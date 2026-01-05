@@ -145,6 +145,121 @@ const createElement = (index, type) => {
 state.container = document.querySelector(".container");
 state.containerSection = document.querySelector(".infinite-scroll-section");
 
+// Helper function to ensure container allows touch events
+const ensureContainerTouchHandling = () => {
+  if (state.containerSection) {
+    // Ensure container and its children don't block touch events
+    state.containerSection.style.pointerEvents = 'auto';
+    if (state.container) {
+      state.container.style.pointerEvents = 'auto';
+    }
+  }
+};
+
+// Touch event handlers for container when stuck
+let containerTouchStartHandler = null;
+let containerTouchMoveHandler = null;
+let containerTouchEndHandler = null;
+
+const setupContainerTouchHandlers = () => {
+  if (!state.containerSection || containerTouchStartHandler) return;
+  
+  containerTouchStartHandler = (e) => {
+    if (!state.isStuck) return;
+    state.isDragging = true;
+    state.isSnapping = false;
+    state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+    state.lastScrollTime = Date.now();
+  };
+  
+  containerTouchMoveHandler = (e) => {
+    if (!state.isDragging || !state.isStuck) return;
+    
+    // Calculate boundaries
+    const maxScroll = -((projectData.length - 1) * state.projectHeight);
+    const atBeginning = state.targetY >= -1;
+    const atEnd = state.targetY <= maxScroll + 1;
+    
+    // Calculate new target position
+    const newTargetY = state.dragStart.scrollY - (e.touches[0].clientY - state.dragStart.y) * 2.0;
+    const scrollingDown = newTargetY < state.targetY;
+    const scrollingUp = newTargetY > state.targetY;
+    
+    // Check boundaries
+    if (atBeginning && scrollingUp) {
+      state.isDragging = false;
+      state.isStuck = false;
+      state.stuckScrollY = 0;
+      if (state.containerSection) {
+        state.containerSection.style.position = '';
+        state.containerSection.style.top = '';
+        state.containerSection.style.left = '';
+        state.containerSection.style.width = '';
+        state.containerSection.style.zIndex = '';
+        state.containerSection.style.touchAction = '';
+      }
+      removeContainerTouchHandlers();
+      const spacer = document.querySelector('.container-spacer');
+      if (spacer) spacer.style.height = '0';
+      const containerOriginalTop = state.containerOriginalTop || state.containerTop;
+      window.scrollTo({ top: Math.max(0, containerOriginalTop - 100), behavior: 'smooth' });
+      return;
+    }
+    
+    if (atEnd && scrollingDown) {
+      state.isDragging = false;
+      state.isStuck = false;
+      state.stuckScrollY = 0;
+      if (state.containerSection) {
+        state.containerSection.style.position = '';
+        state.containerSection.style.top = '';
+        state.containerSection.style.left = '';
+        state.containerSection.style.width = '';
+        state.containerSection.style.zIndex = '';
+        state.containerSection.style.touchAction = '';
+      }
+      removeContainerTouchHandlers();
+      const spacer = document.querySelector('.container-spacer');
+      if (spacer) spacer.style.height = '0';
+      const containerOriginalTop = state.containerOriginalTop || state.containerTop;
+      const containerHeight = state.containerSection?.offsetHeight || window.innerHeight;
+      window.scrollTo({ top: containerOriginalTop + containerHeight, behavior: 'smooth' });
+      return;
+    }
+    
+    // Handle scroll - prevent default to stop native scrolling
+    e.preventDefault();
+    // Don't stop propagation - let it bubble but we've already handled it
+    state.isSnapping = false;
+    const constrainedTargetY = Math.max(maxScroll, Math.min(0, newTargetY));
+    state.targetY = constrainedTargetY;
+    state.lastScrollTime = Date.now();
+    state.currentY = lerp(state.currentY, state.targetY, 0.3);
+    updatePositions();
+  };
+  
+  containerTouchEndHandler = () => {
+    state.isDragging = false;
+  };
+  
+  // Add event listeners to container - events will bubble from children
+  state.containerSection.addEventListener('touchstart', containerTouchStartHandler, { passive: true });
+  state.containerSection.addEventListener('touchmove', containerTouchMoveHandler, { passive: false });
+  state.containerSection.addEventListener('touchend', containerTouchEndHandler, { passive: true });
+};
+
+const removeContainerTouchHandlers = () => {
+  if (!state.containerSection || !containerTouchStartHandler) return;
+  
+  state.containerSection.removeEventListener('touchstart', containerTouchStartHandler);
+  state.containerSection.removeEventListener('touchmove', containerTouchMoveHandler);
+  state.containerSection.removeEventListener('touchend', containerTouchEndHandler);
+  
+  containerTouchStartHandler = null;
+  containerTouchMoveHandler = null;
+  containerTouchEndHandler = null;
+};
+
 // Function to update container position
 const updateContainerPosition = () => {
   if (state.containerSection && !state.containerOriginalTop) {
@@ -444,6 +559,9 @@ window.addEventListener('scroll', () => {
       state.containerSection.style.left = '0px';
       state.containerSection.style.width = '100%';
       state.containerSection.style.zIndex = '1';
+      // Don't set touch-action: none - it blocks all touch events
+      // Instead, we'll handle touch events in the window-level handlers
+      ensureContainerTouchHandling();
       
       // Verify it's actually at top (safeguard against positioning errors)
       const rect = state.containerSection.getBoundingClientRect();
@@ -464,6 +582,9 @@ window.addEventListener('scroll', () => {
       state.containerSection.style.left = '';
       state.containerSection.style.width = '';
       state.containerSection.style.zIndex = '';
+      if (state.container) {
+        state.container.style.pointerEvents = '';
+      }
       
       // Reset spacer
       if (spacer) {
@@ -994,7 +1115,11 @@ window.addEventListener("touchstart", (e) => {
     }
   }
   
-  // Check container state FIRST - this updates isStuck and isInContainer
+  // CRITICAL: Check if container is stuck BEFORE calling checkIfInContainer
+  // This ensures we capture the stuck state before it might be changed
+  const wasStuck = state.isStuck;
+  
+  // Check container state - this updates isStuck and isInContainer
   checkIfInContainer();
   
   // Get container position to check if it's at/near top or in view
@@ -1012,25 +1137,68 @@ window.addEventListener("touchstart", (e) => {
                           containerTopPosition < window.innerHeight && 
                           (containerTopPosition + (state.containerSection?.offsetHeight || window.innerHeight)) > 0;
   
-  // Always allow dragging if container is stuck (container is active)
-  // This ensures touch scroll works when container is active
-  if (state.isStuck) {
+  // CRITICAL: Only prevent default and handle custom scroll when container is STUCK
+  // When not stuck, allow normal page scrolling
+  if (state.isStuck || wasStuck) {
+    // Container is stuck - handle custom scroll
     state.isDragging = true;
     state.isSnapping = false;
-    state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+    if (e.touches && e.touches.length > 0) {
+      state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+    }
     state.lastScrollTime = Date.now();
+    // Ensure container stays stuck if it was stuck
+    if (wasStuck && !state.isStuck) {
+      state.isStuck = true;
+    }
+    // CRITICAL: Prevent default early to stop browser from starting scroll
+    // This must happen in touchstart, not touchmove, to prevent the error
+    if (e.cancelable) {
+      e.preventDefault();
+    }
   } else if (state.isInContainer || containerInView) {
-    // Container is in view but not stuck yet - allow dragging so it can stick
+    // Container is in view but not stuck yet - prepare for potential stick
+    // Don't prevent default - allow normal scrolling to bring container to top
+    // Set isDragging so touchmove can detect when container becomes stuck
     state.isDragging = true;
     state.isSnapping = false;
-    state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+    if (e.touches && e.touches.length > 0) {
+      state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+    }
     state.lastScrollTime = Date.now();
+    // Don't prevent default - allow normal page scroll
   }
   // If container not in view and not stuck, allow normal touch scrolling
-}, { passive: true });
+}, { passive: false }); // Non-passive so we can preventDefault when needed
 
 window.addEventListener("touchmove", (e) => {
   if (!state.isDragging) return;
+  
+  // Ensure we have touch data
+  if (!e.touches || e.touches.length === 0) return;
+  
+  // CRITICAL: Check if container is stuck FIRST
+  // If not stuck, allow normal page scrolling
+  const wasStuck = state.isStuck;
+  checkIfInContainer();
+  
+  // If container just became stuck, update dragStart to current position
+  if (!wasStuck && state.isStuck && e.touches && e.touches.length > 0) {
+    // Container just became stuck - initialize dragStart with current values
+    state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+  }
+  
+  // Ensure dragStart is set
+  if (!state.dragStart && e.touches && e.touches.length > 0) {
+    state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+  }
+  
+  // If container is not stuck, allow normal scrolling
+  if (!state.isStuck && !wasStuck) {
+    // Container not stuck - allow normal page scrolling
+    // Don't prevent default, let browser handle it
+    return;
+  }
   
   // FIRST: Check if we're at the absolute bottom of the page
   // If at bottom, NEVER activate container scroll
@@ -1060,17 +1228,28 @@ window.addEventListener("touchmove", (e) => {
   const atBeginning = state.targetY >= -1;
   const atEnd = state.targetY <= maxScroll + 1;
   
-  // Calculate new target position
-  const newTargetY = state.dragStart.scrollY - (e.touches[0].clientY - state.dragStart.y) * 2.0;
+  // Calculate new target position - ensure dragStart exists
+  if (!state.dragStart || !state.dragStart.y || state.dragStart.scrollY === undefined) {
+    // Initialize dragStart if missing
+    if (e.touches && e.touches.length > 0) {
+      state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+    } else {
+      return; // Can't calculate without touch data
+    }
+  }
+  
+  // Calculate delta based on touch movement (similar to wheel handler)
+  // When finger moves down (clientY increases), we want to scroll down (targetY decreases/becomes more negative)
+  const touchDelta = e.touches[0].clientY - state.dragStart.y; // Positive when finger moves down
+  const scrollDelta = touchDelta * config.SCROLL_SPEED; // Use same speed as wheel
+  const newTargetY = state.dragStart.scrollY - scrollDelta; // Subtract to scroll down (targetY becomes more negative)
   const scrollingDown = newTargetY < state.targetY;
   const scrollingUp = newTargetY > state.targetY;
   
-  // Check container state FIRST - this updates isStuck and isInContainer
-  checkIfInContainer();
-  
-  // CRITICAL: If container is stuck, use custom scroll (including reverse scrolling)
+  // CRITICAL: If container is stuck (or was stuck), use custom scroll (including reverse scrolling)
   // This is the main case when container is active - touch scroll should work here
-  if (state.isStuck) {
+  // Use wasStuck OR state.isStuck to ensure we handle touch scroll when container is active
+  if (state.isStuck || wasStuck) {
     // Check boundaries - only release when at beginning AND scrolling up
     if (atBeginning && scrollingUp) {
       // At beginning and scrolling up - release to show header
@@ -1135,36 +1314,63 @@ window.addEventListener("touchmove", (e) => {
     
     // Container is stuck and not at boundaries - use custom scroll (allows reverse scrolling)
     // THIS IS WHERE TOUCH SCROLL SHOULD WORK WHEN CONTAINER IS ACTIVE
-    e.preventDefault();
-    state.isSnapping = false;
-    state.targetY = newTargetY; // This allows reverse scrolling when scrolling up
-    state.lastScrollTime = Date.now();
-    return;
-  }
-  
-  // Not stuck - check if container is in view
-  if (!state.isInContainer) {
-    // Container not in view - allow normal page scrolling
-    state.isDragging = false;
-    return;
-  }
-  
-  // Container is in view but not stuck yet
-  // Check if container should be stuck now (might have reached top during touch scroll)
-  const containerOriginalTop = state.containerOriginalTop || state.containerTop;
-  // scrollY is already declared at line 1022
-  let containerTopPosition;
-  if (state.containerSection) {
-    if (state.containerSection.style.position === 'fixed') {
-      containerTopPosition = containerOriginalTop - scrollY;
-    } else {
-      const rect = state.containerSection.getBoundingClientRect();
-      containerTopPosition = rect.top;
+    // Only preventDefault if event is cancelable
+    if (e.cancelable) {
+      e.preventDefault();
     }
+    state.isSnapping = false;
+    // Ensure container stays stuck during touch scroll
+    if (!state.isStuck) {
+      state.isStuck = true;
+      if (state.containerSection) {
+        state.containerSection.style.position = 'fixed';
+        state.containerSection.style.top = '0px';
+        state.containerSection.style.left = '0px';
+        state.containerSection.style.width = '100%';
+        state.containerSection.style.zIndex = '1';
+        if (state.container) {
+          state.container.style.pointerEvents = 'auto';
+        }
+        ensureContainerTouchHandling();
+      }
+    }
+    // Ensure isInContainer is true when stuck (needed for syncElements)
+    if (!state.isInContainer) {
+      state.isInContainer = true;
+    }
+    // Constrain targetY to valid range and update
+    const constrainedTargetY = Math.max(maxScroll, Math.min(0, newTargetY));
+    state.targetY = constrainedTargetY; // This allows reverse scrolling when scrolling up
+    state.lastScrollTime = Date.now();
+    // During drag, update currentY directly for immediate feedback (no lerp delay)
+    state.currentY = constrainedTargetY;
+    // Sync elements to create/remove as needed during scroll
+    syncElements();
+    updatePositions(); // Force immediate visual update
+    // Force browser to repaint
+    if (state.container) {
+      state.container.offsetHeight; // Force reflow
+    }
+    return;
   }
   
-  // If container is at/near top and in view, it should stick
-  if (containerTopPosition !== undefined && containerTopPosition <= 10) {
+  // Container might have become stuck during touch - check again
+  // This handles the case where container reaches top during normal scroll
+  if (!state.isStuck) {
+    // Check if container should be stuck now (might have reached top during touch scroll)
+    const containerOriginalTop = state.containerOriginalTop || state.containerTop;
+    let containerTopPosition;
+    if (state.containerSection) {
+      if (state.containerSection.style.position === 'fixed') {
+        containerTopPosition = containerOriginalTop - scrollY;
+      } else {
+        const rect = state.containerSection.getBoundingClientRect();
+        containerTopPosition = rect.top;
+      }
+    }
+    
+    // If container is at/near top, it should stick
+    if (containerTopPosition !== undefined && containerTopPosition <= 10) {
     // Container at/near top - should stick and use custom scroll
     // Check boundaries - only prevent when at end and scrolling down, or at beginning and scrolling up
     if (atEnd && scrollingDown) {
@@ -1206,31 +1412,52 @@ window.addEventListener("touchmove", (e) => {
       syncElements();
     }
     
-    // Use custom scroll - this will make container stick and items scroll (forward or reverse)
-    e.preventDefault();
-    state.targetY = newTargetY; // Allows reverse scrolling when scrolling up
-    state.lastScrollTime = Date.now();
+      // Use custom scroll - this will make container stick and items scroll (forward or reverse)
+      // Only preventDefault if event is cancelable
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+      const constrainedTargetY = Math.max(maxScroll, Math.min(0, newTargetY));
+      state.targetY = constrainedTargetY; // Allows reverse scrolling when scrolling up
+      state.lastScrollTime = Date.now();
+      // During drag, update currentY directly for immediate feedback (no lerp delay)
+      state.currentY = constrainedTargetY;
+      // Sync elements to create/remove as needed during scroll
+      syncElements();
+      updatePositions(); // Force immediate visual update
+      return;
+    }
+    
+    // Container in view but not at top yet
+    // Similar to wheel handler - if container is close to top, use custom scroll to make it stick
+    // This allows smooth transition when container reaches top during initial scroll
+    if (containerTopPosition !== undefined && containerTopPosition > 10 && containerTopPosition <= 50) {
+      // Container is close to top (within 50px) - use custom scroll to help it stick smoothly
+      // This matches wheel handler behavior - it uses custom scroll when container is at/near top
+      // Only preventDefault if event is cancelable
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+      const constrainedTargetY = Math.max(maxScroll, Math.min(0, newTargetY));
+      state.targetY = constrainedTargetY;
+      state.lastScrollTime = Date.now();
+      // During drag, update currentY directly for immediate feedback (no lerp delay)
+      state.currentY = constrainedTargetY;
+      // Sync elements to create/remove as needed during scroll
+      syncElements();
+      updatePositions(); // Force immediate visual update
+      // Force check to see if container should stick now
+      checkIfInContainer();
+      // If container reached top, it will stick via checkIfInContainer
+      return;
+    }
+    
+    // Container is far from top (> 50px) - allow normal scroll to bring it to top
+    // Don't prevent default - let normal scroll work
+    // Keep isDragging true so we can catch it when it gets closer
     return;
   }
-  
-  // Container in view but not at top yet
-  // Similar to wheel handler - if container is close to top, use custom scroll to make it stick
-  // This allows smooth transition when container reaches top during initial scroll
-  if (containerTopPosition !== undefined && containerTopPosition > 10 && containerTopPosition <= 50) {
-    // Container is close to top (within 50px) - use custom scroll to help it stick smoothly
-    // This matches wheel handler behavior - it uses custom scroll when container is at/near top
-    e.preventDefault();
-    state.targetY = newTargetY;
-    state.lastScrollTime = Date.now();
-    // Force check to see if container should stick now
-    checkIfInContainer();
-    // If container reached top, it will stick via checkIfInContainer
-    return;
-  }
-  
-  // Container is far from top (> 50px) - allow normal scroll to bring it to top
-  // Don't prevent default - let normal scroll work
-  // Keep isDragging true so we can catch it when it gets closer
+  // If we get here, container is not stuck and not becoming stuck - allow normal scroll
   return;
 }, { passive: false });
 
