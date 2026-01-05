@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Infinite Parallax Scroll + Minimap | Codegrid</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+  <!-- Menu/Navigation -->
+  <nav class="menu">
+    <div class="menu-content">
+      <h2>Menu</h2>
+      <button class="menu-toggle" aria-label="Toggle menu">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+      <ul class="menu-list">
+        <li><a href="#home">Home</a></li>
+        <li><a href="#projects">Projects</a></li>
+        <li><a href="#about">About</a></li>
+        <li><a href="#contact">Contact</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Regular content section -->
+  <section class="header-section">
+    <div class="section-content">
+      <h1>Welcome to Our Website</h1>
+      <p>This is a regular section with content above the infinite scroll container</p>
+    </div>
+  </section>
+
+  <!-- Infinite Scroll Container Section -->
+  <section class="infinite-scroll-section" id="projects">
+  <div class="container">
+    <ul class="project-list"></ul>
+    <div class="minimap">
+      <div class="minimap-wrapper">
+        <div class="minimap-img-preview"></div>
+        <div class="minimap-info-list"></div>
+      </div>
+    </div>
+  </div>
+    <div class="container-spacer"></div>
+  </section>
+
+  <!-- Regular content section below -->
+  <section class="footer-section">
+    <div class="section-content">
+      <h1>Footer Section</h1>
+      <p>This is a regular section below the infinite scroll container</p>
+    </div>
+    <div class="section-content">
+      <h1>Footer Section</h1>
+      <p>This is a regular section below the infinite scroll container</p>
+    </div>
+    <div class="section-content">
+      <h1>Footer Section</h1>
+      <p>This is a regular section below the infinite scroll container</p>
+    </div>
+    <div class="section-content">
+      <h1>Footer Section</h1>
+      <p>This is a regular section below the infinite scroll container</p>
+    </div>
+
+
+  </section>
+
+  <script src="script.js"></script>
+</body>
+
+</html>
