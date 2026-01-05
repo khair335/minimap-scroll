@@ -1144,7 +1144,8 @@ window.addEventListener("touchstart", (e) => {
     state.isDragging = true;
     state.isSnapping = false;
     if (e.touches && e.touches.length > 0) {
-      state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+      const touchY = e.touches[0].clientY;
+      state.dragStart = { y: touchY, scrollY: state.targetY, lastY: touchY };
     }
     state.lastScrollTime = Date.now();
     // Ensure container stays stuck if it was stuck
@@ -1163,7 +1164,8 @@ window.addEventListener("touchstart", (e) => {
     state.isDragging = true;
     state.isSnapping = false;
     if (e.touches && e.touches.length > 0) {
-      state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+      const touchY = e.touches[0].clientY;
+      state.dragStart = { y: touchY, scrollY: state.targetY, lastY: touchY };
     }
     state.lastScrollTime = Date.now();
     // Don't prevent default - allow normal page scroll
@@ -1185,12 +1187,14 @@ window.addEventListener("touchmove", (e) => {
   // If container just became stuck, update dragStart to current position
   if (!wasStuck && state.isStuck && e.touches && e.touches.length > 0) {
     // Container just became stuck - initialize dragStart with current values
-    state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+    const touchY = e.touches[0].clientY;
+    state.dragStart = { y: touchY, scrollY: state.targetY, lastY: touchY };
   }
   
   // Ensure dragStart is set
   if (!state.dragStart && e.touches && e.touches.length > 0) {
-    state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+    const touchY = e.touches[0].clientY;
+    state.dragStart = { y: touchY, scrollY: state.targetY, lastY: touchY };
   }
   
   // If container is not stuck, allow normal scrolling
@@ -1232,17 +1236,26 @@ window.addEventListener("touchmove", (e) => {
   if (!state.dragStart || !state.dragStart.y || state.dragStart.scrollY === undefined) {
     // Initialize dragStart if missing
     if (e.touches && e.touches.length > 0) {
-      state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+      state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY, lastY: e.touches[0].clientY };
     } else {
       return; // Can't calculate without touch data
     }
   }
   
-  // Calculate delta based on touch movement (similar to wheel handler)
-  // When finger moves down (clientY increases), we want to scroll down (targetY decreases/becomes more negative)
-  const touchDelta = e.touches[0].clientY - state.dragStart.y; // Positive when finger moves down
+  // Use incremental approach: calculate delta from last touch position
+  // This ensures smooth continuous scrolling
+  const currentTouchY = e.touches[0].clientY;
+  // Use lastY if available, otherwise use initial y position
+  const lastTouchY = (state.dragStart.lastY !== undefined) ? state.dragStart.lastY : state.dragStart.y;
+  const touchDelta = currentTouchY - lastTouchY; // Positive when finger moves down
   const scrollDelta = touchDelta * config.SCROLL_SPEED; // Use same speed as wheel
-  const newTargetY = state.dragStart.scrollY - scrollDelta; // Subtract to scroll down (targetY becomes more negative)
+  const newTargetY = state.targetY - scrollDelta; // Subtract to scroll down (targetY becomes more negative)
+  
+  // Update lastY for next calculation
+  if (state.dragStart) {
+    state.dragStart.lastY = currentTouchY;
+  }
+  
   const scrollingDown = newTargetY < state.targetY;
   const scrollingUp = newTargetY > state.targetY;
   
