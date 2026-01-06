@@ -145,6 +145,121 @@ const createElement = (index, type) => {
 state.container = document.querySelector(".container");
 state.containerSection = document.querySelector(".infinite-scroll-section");
 
+// Helper function to ensure container allows touch events
+const ensureContainerTouchHandling = () => {
+  if (state.containerSection) {
+    // Ensure container and its children don't block touch events
+    state.containerSection.style.pointerEvents = 'auto';
+    if (state.container) {
+      state.container.style.pointerEvents = 'auto';
+    }
+  }
+};
+
+// Touch event handlers for container when stuck
+let containerTouchStartHandler = null;
+let containerTouchMoveHandler = null;
+let containerTouchEndHandler = null;
+
+const setupContainerTouchHandlers = () => {
+  if (!state.containerSection || containerTouchStartHandler) return;
+  
+  containerTouchStartHandler = (e) => {
+    if (!state.isStuck) return;
+    state.isDragging = true;
+    state.isSnapping = false;
+    state.dragStart = { y: e.touches[0].clientY, scrollY: state.targetY };
+    state.lastScrollTime = Date.now();
+  };
+  
+  containerTouchMoveHandler = (e) => {
+    if (!state.isDragging || !state.isStuck) return;
+    
+    // Calculate boundaries
+    const maxScroll = -((projectData.length - 1) * state.projectHeight);
+    const atBeginning = state.targetY >= -1;
+    const atEnd = state.targetY <= maxScroll + 1;
+    
+    // Calculate new target position
+    const newTargetY = state.dragStart.scrollY - (e.touches[0].clientY - state.dragStart.y) * 2.0;
+    const scrollingDown = newTargetY < state.targetY;
+    const scrollingUp = newTargetY > state.targetY;
+    
+    // Check boundaries
+    if (atBeginning && scrollingUp) {
+      state.isDragging = false;
+      state.isStuck = false;
+      state.stuckScrollY = 0;
+      if (state.containerSection) {
+        state.containerSection.style.position = '';
+        state.containerSection.style.top = '';
+        state.containerSection.style.left = '';
+        state.containerSection.style.width = '';
+        state.containerSection.style.zIndex = '';
+        state.containerSection.style.touchAction = '';
+      }
+      removeContainerTouchHandlers();
+      const spacer = document.querySelector('.container-spacer');
+      if (spacer) spacer.style.height = '0';
+      const containerOriginalTop = state.containerOriginalTop || state.containerTop;
+      window.scrollTo({ top: Math.max(0, containerOriginalTop - 100), behavior: 'smooth' });
+      return;
+    }
+    
+    if (atEnd && scrollingDown) {
+      state.isDragging = false;
+      state.isStuck = false;
+      state.stuckScrollY = 0;
+      if (state.containerSection) {
+        state.containerSection.style.position = '';
+        state.containerSection.style.top = '';
+        state.containerSection.style.left = '';
+        state.containerSection.style.width = '';
+        state.containerSection.style.zIndex = '';
+        state.containerSection.style.touchAction = '';
+      }
+      removeContainerTouchHandlers();
+      const spacer = document.querySelector('.container-spacer');
+      if (spacer) spacer.style.height = '0';
+      const containerOriginalTop = state.containerOriginalTop || state.containerTop;
+      const containerHeight = state.containerSection?.offsetHeight || window.innerHeight;
+      window.scrollTo({ top: containerOriginalTop + containerHeight, behavior: 'smooth' });
+      return;
+    }
+    
+    // Handle scroll - prevent default to stop native scrolling
+    e.preventDefault();
+    // Don't stop propagation - let it bubble but we've already handled it
+    state.isSnapping = false;
+    const constrainedTargetY = Math.max(maxScroll, Math.min(0, newTargetY));
+    state.targetY = constrainedTargetY;
+    state.lastScrollTime = Date.now();
+    state.currentY = lerp(state.currentY, state.targetY, 0.3);
+    updatePositions();
+  };
+  
+  containerTouchEndHandler = () => {
+    state.isDragging = false;
+  };
+  
+  // Add event listeners to container - events will bubble from children
+  state.containerSection.addEventListener('touchstart', containerTouchStartHandler, { passive: true });
+  state.containerSection.addEventListener('touchmove', containerTouchMoveHandler, { passive: false });
+  state.containerSection.addEventListener('touchend', containerTouchEndHandler, { passive: true });
+};
+
+const removeContainerTouchHandlers = () => {
+  if (!state.containerSection || !containerTouchStartHandler) return;
+  
+  state.containerSection.removeEventListener('touchstart', containerTouchStartHandler);
+  state.containerSection.removeEventListener('touchmove', containerTouchMoveHandler);
+  state.containerSection.removeEventListener('touchend', containerTouchEndHandler);
+  
+  containerTouchStartHandler = null;
+  containerTouchMoveHandler = null;
+  containerTouchEndHandler = null;
+};
+
 // Function to update container position
 const updateContainerPosition = () => {
   if (state.containerSection && !state.containerOriginalTop) {
@@ -444,6 +559,9 @@ window.addEventListener('scroll', () => {
       state.containerSection.style.left = '0px';
       state.containerSection.style.width = '100%';
       state.containerSection.style.zIndex = '1';
+      // Don't set touch-action: none - it blocks all touch events
+      // Instead, we'll handle touch events in the window-level handlers
+      ensureContainerTouchHandling();
       
       // Verify it's actually at top (safeguard against positioning errors)
       const rect = state.containerSection.getBoundingClientRect();
@@ -464,6 +582,9 @@ window.addEventListener('scroll', () => {
       state.containerSection.style.left = '';
       state.containerSection.style.width = '';
       state.containerSection.style.zIndex = '';
+      if (state.container) {
+        state.container.style.pointerEvents = '';
+      }
       
       // Reset spacer
       if (spacer) {
@@ -990,6 +1111,7 @@ window.addEventListener("touchstart", (e) => {
     state.isDragging = true;
     state.isSnapping = false;
     state.lastScrollTime = Date.now();
+    // Don't prevent default - allow normal page scroll
   }
 }, { passive: true });
 
