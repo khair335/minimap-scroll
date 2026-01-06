@@ -40,7 +40,7 @@ const projectData = [
 
 const config = {
 // Base speed for wheel/keyboard
-SCROLL_SPEED: window.innerWidth < 768 ? 2.2 : 1.5, 
+SCROLL_SPEED: window.innerWidth < 768 ? 0.5 : 1.5, 
 // Lower factor = smoother but "laggier", Higher = more responsive
 LERP_FACTOR: window.innerWidth < 768 ? 0.25 : 0.1,
   BUFFER_SIZE: 5,
@@ -263,262 +263,80 @@ const removeContainerTouchHandlers = () => {
 };
 
 // Function to update container position
-const updateContainerPosition = () => {
-  if (state.containerSection && !state.containerOriginalTop) {
-    // Only calculate original position if not already set
-    // Temporarily remove fixed positioning to get real position
-    const wasFixed = state.containerSection.style.position === 'fixed';
-    if (wasFixed) {
-      state.containerSection.style.position = '';
-      state.containerSection.style.top = '';
-      state.containerSection.style.left = '';
-      state.containerSection.style.width = '';
-      // Force a reflow to get accurate position
-      state.containerSection.offsetHeight;
-    }
-    const rect = state.containerSection.getBoundingClientRect();
-    state.containerOriginalTop = rect.top + window.scrollY;
-    if (wasFixed) {
-      state.containerSection.style.position = 'fixed';
-      state.containerSection.style.top = '0px';
-      state.containerSection.style.left = '0px';
-      state.containerSection.style.width = '100%';
-    }
-  }
-  // Always use the stored original top
-  if (state.containerOriginalTop) {
-    state.containerTop = state.containerOriginalTop;
-  }
-};
-
-// Check if we're in the container section and if it should be stuck
-const checkIfInContainer = () => {
-  if (!state.containerSection) {
-    state.isInContainer = false;
-    state.isStuck = false;
-    return false;
-  }
-  
-  const viewportHeight = window.innerHeight;
-  const containerOriginalTop = state.containerOriginalTop || state.containerTop;
-  
-  // Calculate total scroll needed for all projects
-  const totalProjectsHeight = projectData.length * state.projectHeight;
-  // Max scroll is when the last project is fully visible
-  // We need to scroll: (number of projects - 1) * projectHeight to see the last project
-  const maxInternalScroll = (projectData.length - 1) * state.projectHeight;
-  
-  // Check if we've scrolled through all projects (allow reaching the last item)
-  // Use a more lenient check to ensure release happens
-  const allProjectsScrolled = state.targetY <= -(maxInternalScroll - 10);
-  
-  // Check if we're at the beginning (can scroll up to header)
-  const atBeginning = state.targetY >= -1;
-  
-  // IMPORTANT: If we've scrolled through all projects, NEVER stick
-  // And DON'T activate container scroll if we've scrolled past the container
-  if (allProjectsScrolled) {
-    if (state.isStuck) {
-      state.isStuck = false;
-      state.stuckScrollY = 0;
-      // Immediately reset container positioning to allow normal scroll
-      if (state.containerSection) {
-        state.containerSection.style.position = '';
-        state.containerSection.style.top = '';
-        state.containerSection.style.left = '';
-        state.containerSection.style.width = '';
-        state.containerSection.style.zIndex = '';
-      }
-      const spacer = document.querySelector('.container-spacer');
-      if (spacer) {
-        spacer.style.height = '0';
-      }
-    }
-    // Check if we're at the absolute bottom of the page
-    // If at bottom, never activate container scroll
-    const currentScrollY = window.scrollY;
-    const documentHeight = document.documentElement.scrollHeight;
-    const atAbsoluteBottom = currentScrollY + viewportHeight >= documentHeight - 10;
-    
-    // Also check if footer's bottom is at the bottom of viewport
-    const footerSection = document.querySelector('.footer-section');
-    let atFooterBottom = false;
-  // Inside checkIfInContainer, around line 350:
-if (allProjectsScrolledCheck) {
-  const currentScrollY = window.scrollY;
-  const footerSection = document.querySelector('.footer-section');
-  if (footerSection) {
-      const footerRect = footerSection.getBoundingClientRect();
-      // If the footer is visible and we are scrolling further down, force isInContainer to false
-      if (footerRect.top < window.innerHeight) {
-          state.isInContainer = false;
-          return false;
-      }
+function updateContainerPosition() {
+  if (state.isStuck) {
+    state.containerSection.style.position = 'fixed';
+    state.containerSection.style.top = '0';
+    state.containerSection.style.left = '0';
+    state.containerSection.style.width = '100%';
+  } else {
+    state.containerSection.style.position = 'relative';
+    state.containerSection.style.top = 'auto';
   }
 }
-    
-    // If at absolute bottom OR at footer bottom, never activate container
-    if (atAbsoluteBottom || atFooterBottom) {
-      state.isInContainer = false;
-      return false;
-    }
-    
-    // Check if we've scrolled PAST the container (to footer)
-    // Once past the container, don't activate container scroll
-    const containerOriginalTop = state.containerOriginalTop || state.containerTop;
-    const rect = state.containerSection.getBoundingClientRect();
-    const containerHeight = state.containerSection?.offsetHeight || viewportHeight;
-    const containerBottom = containerOriginalTop + containerHeight;
-    
-    // Check if footer is actually in view - only then disable container scroll
-    let atFooter = false;
-    if (footerSection) {
-      const footerRect = footerSection.getBoundingClientRect();
-      // Only consider at footer if footer is actually visible in viewport
-      atFooter = footerRect.top < viewportHeight && footerRect.bottom > 0;
-    }
-    
-    // If we've scrolled past the container's bottom AND footer is in view, don't activate
-    const scrolledPastContainer = currentScrollY > containerBottom - 50;
-    
-    if (scrolledPastContainer && atFooter) {
-      // Scrolled past container AND footer is visible - don't activate container scroll
-      state.isInContainer = false;
-      return false;
-    }
-    
-    // Container is still in view and we haven't scrolled past it (or footer not visible)
-    // But since all projects are scrolled, don't activate custom scroll
-    // Only allow if container is still in the main viewport
-    const isInView = rect.top < viewportHeight && rect.bottom > 0;
-    state.isInContainer = isInView;
-    return state.isInContainer;
-  }
+
+// Helper to constrain scroll
+const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+
+// 1. Added a direction tracker to the state
+state.lastDeltaY = 0; 
+
+// Add to your state object at the top
+state.isProcessing = false; 
+
+state.isProcessing = false;
+state.touchStartY = 0;
+state.touchThreshold = 40; // Pixels required to trigger a move
+
+const checkIfInContainer = () => {
+  if (!state.containerSection) return false;
   
-  // At beginning: Only prevent sticking if we're trying to scroll UP past the beginning
-  // Allow sticking when at beginning if container reaches top (for initial stick)
-  if (atBeginning) {
-    // Only release if already stuck AND we're trying to scroll up
-    // This allows initial sticking when container reaches top
-    // The event handlers will handle preventing scroll up at beginning
-    if (state.isStuck) {
-      // Keep stuck state - event handlers will release if needed
-    }
-  }
-  
-  // Get the actual position of the container relative to viewport
-  const scrollY = window.scrollY;
-  let containerTopPosition;
-  
-  // Always use the original position to calculate, regardless of current state
-  // This ensures consistent behavior every time
-  if (state.containerSection.style.position === 'fixed') {
-    // If fixed, calculate where it would be: original position - current scroll
-    containerTopPosition = containerOriginalTop - scrollY;
-  } else {
-    // If not fixed, get actual position from DOM (most accurate)
-    const rect = state.containerSection.getBoundingClientRect();
-    containerTopPosition = rect.top;
-    
-    // Verify against calculated position for consistency
-    const calculatedPosition = containerOriginalTop - scrollY;
-    // If positions differ significantly, trust DOM but log for debugging
-    if (Math.abs(containerTopPosition - calculatedPosition) > 5) {
-      // Use DOM position as it's more accurate in real-time
-      containerTopPosition = rect.top;
-    }
-  }
-  
-  // Container should stick when its top edge reaches or passes the top of viewport (0)
-  // Use a reasonable threshold (5px) to account for rounding and ensure it sticks reliably
-  // This allows sticking when close to top but prevents sticking at middle
-  const containerTopReached = containerTopPosition <= 15;
-  
-  // Container should be stuck when:
-  // 1. Container top has reached viewport top, AND
-  // 2. We haven't scrolled through all projects yet
-  // Note: atBeginning check is handled separately - we allow initial sticking
-  const shouldBeStuck = containerTopReached && !allProjectsScrolled;
-  
-  // Update stuck state
-  if (shouldBeStuck !== state.isStuck) {
-    state.isStuck = shouldBeStuck;
-    
-    if (state.isStuck) {
-      // Store the scroll position when first getting stuck
-      if (state.stuckScrollY === 0) {
-        state.stuckScrollY = scrollY;
-      }
-    } else {
-      // Only reset stuckScrollY when actually releasing
-      state.stuckScrollY = 0;
-    }
-  }
-  
-  // Check if all projects are scrolled first
-  const totalProjectsHeightCheck = projectData.length * state.projectHeight;
-  const maxInternalScrollCheck = (projectData.length - 1) * state.projectHeight;
-  const allProjectsScrolledCheck = state.targetY <= -(maxInternalScrollCheck - 10);
-  
-  // CRITICAL: Only check for bottom if all projects are scrolled
-  // This prevents blocking container scroll when container is still active
-  if (allProjectsScrolledCheck) {
-    const currentScrollY = window.scrollY;
-    const documentHeight = document.documentElement.scrollHeight;
-    const currentViewportHeight = window.innerHeight;
-    const atAbsoluteBottom = currentScrollY + currentViewportHeight >= documentHeight - 10;
-    
-    // Also check if footer's bottom is at the bottom of viewport
-    const footerSection = document.querySelector('.footer-section');
-    let atFooterBottom = false;
-    if (footerSection) {
-      const footerRect = footerSection.getBoundingClientRect();
-      // If footer's bottom is at or near the bottom of viewport, we're at footer bottom
-      atFooterBottom = footerRect.bottom >= currentViewportHeight - 10 && footerRect.bottom <= currentViewportHeight + 10;
-    }
-    
-    // If at absolute bottom of page OR at footer bottom AND all projects scrolled, NEVER activate container
-    // This prevents container from reactivating when user reaches bottom of footer
-    if (atAbsoluteBottom || atFooterBottom) {
-      // Always prevent container activation when at bottom and all projects scrolled
-      state.isInContainer = false;
-      // Keep targetY at the end to prevent scrolling back
-      state.targetY = -maxInternalScrollCheck;
-      return false;
-    }
-  }
-  
-  // CRITICAL: Check if we're at the absolute bottom BEFORE setting isInContainer
-  // This must be checked regardless of allProjectsScrolled to prevent reactivation
-  const currentScrollY = window.scrollY;
-  const documentHeight = document.documentElement.scrollHeight;
-  const currentViewportHeight = window.innerHeight;
-  const atAbsoluteBottom = currentScrollY + currentViewportHeight >= documentHeight - 10;
-  
-  const footerSection = document.querySelector('.footer-section');
-  let atFooterBottom = false;
-  if (footerSection) {
-    const footerRect = footerSection.getBoundingClientRect();
-    atFooterBottom = footerRect.bottom >= currentViewportHeight - 10 && footerRect.bottom <= currentViewportHeight + 10;
-  }
-  
-  // If at absolute bottom AND all projects scrolled, NEVER activate container
-  if ((atAbsoluteBottom || atFooterBottom) && allProjectsScrolledCheck) {
-    state.isInContainer = false;
-    state.targetY = -maxInternalScrollCheck;
-    return false;
-  }
-  
-  // Container is active when it's visible in viewport (for scroll and minimap to work)
-  // Use a more lenient threshold to ensure container scroll works when container is in view
   const rect = state.containerSection.getBoundingClientRect();
-  const threshold = viewportHeight * 0.5; // More lenient threshold
-  const isInView = rect.top < viewportHeight && rect.bottom > 0; // Container is in viewport
-  // Container is active if it's in view OR stuck (stuck means it's definitely active)
-  // BUT only if not at bottom with all projects scrolled
-  state.isInContainer = (isInView || state.isStuck) && !((atAbsoluteBottom || atFooterBottom) && allProjectsScrolledCheck);
+  const viewportHeight = window.innerHeight;
+  const maxInternalScroll = -((projectData.length - 1) * state.projectHeight);
   
-  return state.isInContainer;
+  // Use a slightly larger buffer for mobile to ensure the catch happens
+  const atStart = state.targetY >= -5;
+  const atEnd = state.targetY <= maxInternalScroll + 5;
+  const scrollingDown = state.lastDeltaY > 0;
+  const scrollingUp = state.lastDeltaY < 0;
+
+  if (!state.isStuck) {
+    // 1. ENTERING FROM TOP (Heading Down)
+    if (rect.top <= 10 && rect.top >= -50 && scrollingDown && !atEnd) {
+      state.isStuck = true;
+      window.scrollTo(0, state.containerOriginalTop);
+    } 
+    // 2. ENTERING FROM BOTTOM (Heading Up)
+    // We detect if the bottom of the container enters the viewport from below
+    else if (rect.bottom >= viewportHeight - 10 && rect.bottom <= viewportHeight + 100 && scrollingUp && !atStart) {
+      state.isStuck = true;
+      
+      // FORCE STATE TO LAST ITEM:
+      // This prevents the jump to the first item when coming from the footer
+      state.targetY = maxInternalScroll;
+      state.currentY = maxInternalScroll; 
+      
+      window.scrollTo(0, state.containerOriginalTop);
+    }
+  } else {
+    // RELEASE LOGIC: Only release if at the edges AND moving away from the container
+    if (atStart && scrollingUp) {
+      state.isStuck = false;
+    } else if (atEnd && scrollingDown) {
+      state.isStuck = false;
+    }
+  }
+  
+  state.isInContainer = state.isStuck || (rect.top < viewportHeight && rect.bottom > 0);
+  return state.isStuck;
+};
+
+const moveToNextItem = (direction) => {
+  const maxInternalScroll = -((projectData.length - 1) * state.projectHeight);
+  let newY = state.targetY - (direction * state.projectHeight);
+  state.targetY = Math.max(maxInternalScroll, Math.min(0, newY));
+  state.lastScrollTime = Date.now();
 };
 
 // Update container position on load and resize
@@ -672,37 +490,42 @@ const updateSnap = () => {
 const updatePositions = () => {
   if (!state.container) return;
   
-  // Calculate project positions relative to container
-  const totalProjectsHeight = projectData.length * state.projectHeight;
-  const projectScrollY = state.currentY;
-  const minimapy = (projectScrollY * state.minimapHeight) / state.projectHeight;
+  // Smoothing: Move currentY toward targetY by 10% every frame
+  const eased = 0.1; 
+  state.currentY += (state.targetY - state.currentY) * eased;
   
-  // Update projects position (always update for smooth transitions)
+  const projectScrollY = state.currentY;
+  const minimapRatio = state.minimapHeight / state.projectHeight;
+  const minimapY = projectScrollY * minimapRatio;
+  
+  // Update main project items
   state.projects.forEach((item, index) => {
-    const y = index * state.projectHeight + projectScrollY;
+    const y = (index * state.projectHeight) + projectScrollY;
     item.el.style.transform = `translateY(${y}px)`;
     if (item.parallax) {
       item.parallax.update(projectScrollY, index);
     }
   });
   
-  // Update minimap visibility
+  // Update Minimap container visibility
   const minimap = document.querySelector(".minimap");
   if (minimap) {
     minimap.style.opacity = state.isInContainer ? "1" : "0";
+    minimap.style.pointerEvents = state.isStuck ? "all" : "none";
   }
   
-  // Update minimap positions
+  // Update Minimap image items
   state.minimap.forEach((item, index) => {
-    const y = index * state.minimapHeight + minimapy;
+    const y = (index * state.minimapHeight) + minimapY;
     item.el.style.transform = `translateY(${y}px)`;
     if (item.parallax) {
-      item.parallax.update(minimapy, index);
+      item.parallax.update(minimapY, index);
     }
   });
   
+  // Update Minimap text info
   state.minimapInfo.forEach((item, index) => {
-    const y = index * state.minimapHeight + minimapy + 40;
+    const y = (index * state.minimapHeight) + minimapY + 40;
     item.el.style.transform = `translateY(${y}px)`;
   });
 };
@@ -788,321 +611,54 @@ const animate = () => {
 };
 animate();
 
-window.addEventListener(
-  "wheel",
-  (e) => {
-    // Calculate boundaries first
-    const totalProjectsHeight = projectData.length * state.projectHeight;
-    // Max scroll allows viewing the last project: (n-1) * height
-    const maxScroll = -((projectData.length - 1) * state.projectHeight);
-    const atBeginning = state.targetY >= -1;
-    const atEnd = state.targetY <= maxScroll + 1;
-    
-    // CRITICAL: Check boundaries FIRST before any other checks
-    // This ensures we release and allow normal scroll before checking container state
-    // If at end and scrolling down, ALWAYS allow normal scroll FIRST
-    // This must happen before any other checks to ensure footer is accessible
-    if (atEnd && e.deltaY > 0) {
-      // Check if we're at the absolute bottom of the page
-      const scrollY = window.scrollY;
-      const documentHeight = document.documentElement.scrollHeight;
-      const viewportHeight = window.innerHeight;
-      const atAbsoluteBottom = scrollY + viewportHeight >= documentHeight - 10;
-      
-      const footerSection = document.querySelector('.footer-section');
-      let atFooterBottom = false;
-      if (footerSection) {
-        const footerRect = footerSection.getBoundingClientRect();
-        atFooterBottom = footerRect.bottom >= viewportHeight - 10 && footerRect.bottom <= viewportHeight + 10;
-      }
-      
-      // If at absolute bottom, never reactivate container
-      if (atAbsoluteBottom || atFooterBottom) {
-        // At bottom - allow normal scroll only, never reactivate container
-        return; // Allow normal page scroll
-      }
-      
-      // Force release if stuck - do this immediately
-      if (state.isStuck) {
-        state.isStuck = false;
-        state.stuckScrollY = 0;
-        // Reset container positioning immediately
-        if (state.containerSection) {
-          state.containerSection.style.position = '';
-          state.containerSection.style.top = '';
-          state.containerSection.style.left = '';
-          state.containerSection.style.width = '';
-          state.containerSection.style.zIndex = '';
-        }
-        const spacer = document.querySelector('.container-spacer');
-        if (spacer) {
-          spacer.style.height = '0';
-        }
-      }
-      // CRITICAL: Never prevent default when at end - always allow normal scroll
-      // Don't use smooth scroll here - let the user's natural scroll work
-      return; // Allow normal page scroll - DO NOT prevent default
-    }
-    
-    // Get current container position for remaining checks
-    const containerOriginalTop = state.containerOriginalTop || state.containerTop;
-    const scrollY = window.scrollY;
-    let containerTopPosition;
-    
-    if (state.containerSection) {
-      if (state.containerSection.style.position === 'fixed') {
-        containerTopPosition = containerOriginalTop - scrollY;
-      } else {
-        const rect = state.containerSection.getBoundingClientRect();
-        containerTopPosition = rect.top;
-      }
-    }
-    
-    // Check container state FIRST - this updates isStuck and isInContainer
-    checkIfInContainer();
-    
-    // CRITICAL: If container is stuck, use custom scroll (including reverse scrolling)
-    if (state.isStuck) {
-      // Check boundaries - only release when at beginning AND scrolling up
-      if (atBeginning && e.deltaY < 0) {
-        // At beginning and scrolling up - release to show header
-        state.isStuck = false;
-        state.stuckScrollY = 0;
-        // Reset container positioning immediately
-        if (state.containerSection) {
-          state.containerSection.style.position = '';
-          state.containerSection.style.top = '';
-          state.containerSection.style.left = '';
-          state.containerSection.style.width = '';
-          state.containerSection.style.zIndex = '';
-        }
-        const spacer = document.querySelector('.container-spacer');
-        if (spacer) {
-          spacer.style.height = '0';
-        }
-        // Allow normal scroll to header
-        return; // Allow normal page scroll
-      }
-      
-      // Container is stuck and not at beginning - use custom scroll (allows reverse scrolling)
-      e.preventDefault();
-      state.isSnapping = false;
-      state.lastScrollTime = Date.now();
-      const delta = Math.max(
-        Math.min(e.deltaY * config.SCROLL_SPEED, config.MAX_VELOCITY),
-        -config.MAX_VELOCITY
-      );
-      state.targetY -= delta; // This allows reverse scrolling when deltaY is negative (scrolling up)
-      return;
-    }
-    
-    // Not stuck - check if container is in view
-    if (!state.isInContainer) {
-      // Container not in view - allow normal page scrolling
-      return;
-    }
-    
-    // Container is in view but not stuck yet
-    // Check if container is at/near top - if so, use custom scroll to make it stick
-    if (containerTopPosition !== undefined) {
-      if (containerTopPosition <= 10) {
-        // Container at/near top - use custom scroll to make it stick
-        // Allow custom scroll when scrolling down (deltaY > 0) even at beginning
-        // Only prevent when at end and scrolling down, or at beginning and scrolling up
-        const scrollingDown = e.deltaY > 0;
-        const scrollingUp = e.deltaY < 0;
-        
-        if (atEnd && scrollingDown) {
-          // At end and scrolling down - allow normal scroll to footer
-          return;
-        }
-        
-        if (atBeginning && scrollingUp) {
-          // At beginning and scrolling up - allow normal scroll to header
-          return;
-        }
-        
-        // Use custom scroll - this will make container stick and items scroll
-        e.preventDefault();
-        state.isSnapping = false;
-        state.lastScrollTime = Date.now();
-        const delta = Math.max(
-          Math.min(e.deltaY * config.SCROLL_SPEED, config.MAX_VELOCITY),
-          -config.MAX_VELOCITY
-        );
-        state.targetY -= delta;
-        // Force check again to ensure container sticks
-        // The animate loop will handle the actual sticking via checkIfInContainer
-        return;
-      } else {
-        // Container in view but not at top yet (> 10px) - allow normal scroll to bring it to top
-        return;
-      }
-    } else {
-      // Can't determine position - allow normal scroll
-      return;
-    }
-  },
-  { passive: false }
-);
+// Update the wheel listener to track delta
+// --- WHEEL HANDLER ---
+window.addEventListener("wheel", (e) => {
+  state.lastDeltaY = e.deltaY;
+  
+  // 1. Check if we should be stuck
+  const stuck = checkIfInContainer();
+  
+  if (stuck) {
+    const maxInternalScroll = -((projectData.length - 1) * state.projectHeight);
+    const atStart = state.targetY >= -1;
+    const atEnd = state.targetY <= maxInternalScroll + 1;
 
+    // 2. Break out check: If at edge and scrolling away, let page scroll
+    if ((atEnd && e.deltaY > 0) || (atStart && e.deltaY < 0)) {
+      state.isStuck = false;
+      return; 
+    }
+
+    // 3. One item per scroll logic
+    e.preventDefault();
+    
+    // Debounce: prevent "free spinning" wheel from flying through items
+    if (Math.abs(e.deltaY) > 10 && !state.isProcessing) {
+      state.isProcessing = true;
+      moveToNextItem(Math.sign(e.deltaY));
+      
+      // Allow next scroll after a brief pause for the animation to feel solid
+      setTimeout(() => { state.isProcessing = false; }, 400); 
+    }
+  }
+}, { passive: false });
+// --- KEYBOARD HANDLER ---
 window.addEventListener("keydown", (e) => {
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-    // Calculate boundaries first (needed for all checks)
-    const containerOriginalTop = state.containerOriginalTop || state.containerTop;
-    const scrollAmount = state.projectHeight * 0.8;
+    state.lastDeltaY = e.key === "ArrowDown" ? 1 : -1;
+    const stuck = checkIfInContainer();
     
-    // Calculate boundaries
-    const totalProjectsHeight = projectData.length * state.projectHeight;
-    // Max scroll allows viewing the last project: (n-1) * height
-    const maxScroll = -((projectData.length - 1) * state.projectHeight);
-    const atBeginning = state.targetY >= -1;
-    const atEnd = state.targetY <= maxScroll + 1;
-    
-    // Get current container position
-    const scrollY = window.scrollY;
-    let containerTopPosition;
-    if (state.containerSection) {
-      if (state.containerSection.style.position === 'fixed') {
-        containerTopPosition = containerOriginalTop - scrollY;
-      } else {
-        const rect = state.containerSection.getBoundingClientRect();
-        containerTopPosition = rect.top;
-      }
-    }
-    
-    // Check container state FIRST - this updates isStuck and isInContainer
-    checkIfInContainer();
-    
-    // CRITICAL: If container is stuck, use custom scroll FIRST (before boundary checks)
-    // This ensures keyboard scrolling works when container is locked/stuck
-    if (state.isStuck) {
-      // Check boundaries to prevent scrolling past limits
-      if (atEnd && e.key === "ArrowDown") {
-        // At end and scrolling down - release and allow normal scroll to footer
+    if (stuck) {
+      const maxInternalScroll = -((projectData.length - 1) * state.projectHeight);
+      if ((state.targetY <= maxInternalScroll + 1 && e.key === "ArrowDown") || 
+          (state.targetY >= -1 && e.key === "ArrowUp")) {
         state.isStuck = false;
-        state.stuckScrollY = 0;
-        // Reset container positioning
-        if (state.containerSection) {
-          state.containerSection.style.position = '';
-          state.containerSection.style.top = '';
-          state.containerSection.style.left = '';
-          state.containerSection.style.width = '';
-          state.containerSection.style.zIndex = '';
-        }
-        const spacer = document.querySelector('.container-spacer');
-        if (spacer) {
-          spacer.style.height = '0';
-        }
-        
-        // Smoothly scroll past container to show footer
-        const containerHeight = state.containerSection?.offsetHeight || window.innerHeight;
-        const targetScroll = containerOriginalTop + containerHeight;
-        
-        window.scrollTo({
-          top: targetScroll,
-          behavior: 'smooth'
-        });
-        return; // Allow normal scroll to footer
-      }
-      
-      if (atBeginning && e.key === "ArrowUp") {
-        // At beginning and scrolling up - release and allow normal scroll to header
-        state.isStuck = false;
-        state.stuckScrollY = 0;
-        // Reset container positioning
-        if (state.containerSection) {
-          state.containerSection.style.position = '';
-          state.containerSection.style.top = '';
-          state.containerSection.style.left = '';
-          state.containerSection.style.width = '';
-          state.containerSection.style.zIndex = '';
-        }
-        const spacer = document.querySelector('.container-spacer');
-        if (spacer) {
-          spacer.style.height = '0';
-        }
-        
-        // Smoothly scroll up to show header
-        const targetScroll = Math.max(0, containerOriginalTop - 100);
-        
-        window.scrollTo({
-          top: targetScroll,
-          behavior: 'smooth'
-        });
-        return; // Allow normal scroll to header
-      }
-      
-      // Container is stuck and not at boundaries - use custom scroll
-      e.preventDefault();
-      state.isSnapping = false;
-      state.lastScrollTime = Date.now();
-      const delta = e.key === "ArrowDown" ? scrollAmount : -scrollAmount;
-      state.targetY -= delta;
-      return;
-    }
-    
-    // If at end and pressing ArrowDown, smoothly transition to footer
-    if (atEnd && e.key === "ArrowDown") {
-      return; // Allow normal scroll to footer
-    }
-    
-    // If at beginning and pressing ArrowUp, smoothly transition to header
-    if (atBeginning && e.key === "ArrowUp") {
-      return; // Allow normal scroll to header
-    }
-    
-    // Not stuck - check if container is in view
-    if (!state.isInContainer) {
-      // Container not in view - allow normal page scrolling
-      return;
-    }
-    
-    // Container is in view but not stuck yet
-    // Check if container is at/near top - if so, use custom scroll to make it stick
-    if (containerTopPosition !== undefined && containerTopPosition <= 10) {
-      // Container at/near top - use custom scroll to make it stick
-      // Allow custom scroll when scrolling down (ArrowDown) even at beginning
-      // Only prevent when at end and scrolling down, or at beginning and scrolling up
-      if (atEnd && e.key === "ArrowDown") {
-        // At end and scrolling down - allow normal scroll to footer
         return;
       }
-      
-      if (atBeginning && e.key === "ArrowUp") {
-        // At beginning and scrolling up - allow normal scroll to header
-        return;
-      }
-      
-      // Use custom scroll - this will make container stick and items scroll
       e.preventDefault();
-      state.isSnapping = false;
-      state.lastScrollTime = Date.now();
-      const delta = e.key === "ArrowDown" ? scrollAmount : -scrollAmount;
-      state.targetY -= delta;
-      return;
+      moveToNextItem(Math.sign(state.lastDeltaY));
     }
-    
-    // Container in view but not at top yet - allow normal scroll to bring it to top
-    // If container is above viewport or not yet at top, allow normal scroll
-    if (containerTopPosition !== undefined && containerTopPosition > 10) {
-      // Allow normal page scroll to bring container to top
-      // Simulate scroll by programmatically scrolling
-      if (e.key === "ArrowDown") {
-        window.scrollBy({ top: scrollAmount, behavior: 'auto' });
-      } else {
-        window.scrollBy({ top: -scrollAmount, behavior: 'auto' });
-      }
-      e.preventDefault();
-      // Recheck after allowing scroll
-      setTimeout(() => {
-        checkIfInContainer();
-      }, 10);
-      return;
-    }
-    
-    // Can't determine position - allow normal scroll
-    return;
   }
 });
 
@@ -1110,66 +666,50 @@ window.addEventListener("keydown", (e) => {
 // Robust Touch Logic using Delta Tracking
 let lastTouchY = 0;
 
+
 window.addEventListener("touchstart", (e) => {
-  lastTouchY = e.touches[0].clientY;
-  
-  // Refresh state to see if we are in/near the container
-  checkIfInContainer();
-  
-  // Allow dragging if we are stuck OR near the container to catch the scroll
-  if (state.isStuck || state.isInContainer) {
-    state.isDragging = true;
-    state.isSnapping = false;
-    state.lastScrollTime = Date.now();
-    // Don't prevent default - allow normal page scroll
-  }
+  state.touchStartY = e.touches[0].clientY;
 }, { passive: true });
 
 window.addEventListener("touchmove", (e) => {
-  if (!state.isDragging) return;
+  const currentY = e.touches[0].clientY;
+  const diffY = state.touchStartY - currentY; // positive = swipe up (scroll down)
+  state.lastDeltaY = diffY;
 
-  const currentTouchY = e.touches[0].clientY;
-  const deltaY = lastTouchY - currentTouchY; 
-  lastTouchY = currentTouchY;
+  // We check if we should be stuck before preventing default behavior
+  const stuck = checkIfInContainer();
 
-  const maxScroll = -((projectData.length - 1) * state.projectHeight);
-  const atBeginning = state.targetY >= -1;
-  const atEnd = state.targetY <= maxScroll + 1;
+  if (stuck) {
+    const maxInternalScroll = -((projectData.length - 1) * state.projectHeight);
+    const atStart = state.targetY >= -5;
+    const atEnd = state.targetY <= maxInternalScroll + 5;
 
-  if (state.isStuck) {
-    const tryingToExitTop = atBeginning && deltaY < 0;
-    const tryingToExitBottom = atEnd && deltaY > 0;
+    // RELEASE CHECK: If user is at the end and swipes up, or start and swipes down, 
+    // we let the browser take over the scroll to show footer/header.
+    if ((atEnd && diffY > 5) || (atStart && diffY < -5)) {
+      state.isStuck = false;
+      return; 
+    }
 
-    if (!tryingToExitTop && !tryingToExitBottom) {
-      if (e.cancelable) e.preventDefault();
+    // LOCK: Prevent the background page from moving
+    if (e.cancelable) e.preventDefault();
+
+    // STEP LOGIC: Trigger one item move per swipe gesture
+    if (!state.isProcessing && Math.abs(diffY) > state.touchThreshold) {
+      state.isProcessing = true;
       
-      // INCREASE SENSITIVITY: 
-      // We multiply deltaY to make small finger movements translate to larger scrolls
-      const sensitivity = 2.0; 
-      state.targetY -= deltaY * config.SCROLL_SPEED * sensitivity; 
+      const direction = Math.sign(diffY);
+      const newTarget = state.targetY - (direction * state.projectHeight);
+      
+      // Keep it strictly within the bounds of the project list
+      state.targetY = Math.max(maxInternalScroll, Math.min(0, newTarget));
       
       state.lastScrollTime = Date.now();
-      return;
-    } else {
-      state.isStuck = false;
-      state.isDragging = false;
-      if (state.containerSection) {
-        state.containerSection.style.position = '';
-        state.containerSection.style.top = '';
-      }
-      return;
-    }
-  }
+      state.touchStartY = currentY; // Reset pivot to allow continuous long swipes
 
-  // RE-ENTRY GUARD: Same as before to prevent jumping back from footer
-  if (atEnd && deltaY > 0) return;
-
-  const rect = state.containerSection?.getBoundingClientRect();
-  if (rect && rect.top <= 20 && rect.top >= -20 && !state.isStuck) {
-    if ((deltaY > 0 && !atEnd) || (deltaY < 0 && !atBeginning)) {
-      state.isStuck = true;
-      if (e.cancelable) e.preventDefault();
-      state.targetY -= deltaY * config.SCROLL_SPEED;
+      setTimeout(() => {
+        state.isProcessing = false;
+      }, 400); // Wait for animation to finish
     }
   }
 }, { passive: false });

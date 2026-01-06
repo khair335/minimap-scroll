@@ -250,13 +250,14 @@ p {
 .infinite-scroll-section {
   position: relative;
   width: 100%;
-  min-height: 100vh;
-  background: #000;
+  height: 100vh; /* Keep this visible area */
+  background: #fff;
 }
 
 .container-spacer {
-  height: 0;
-  transition: height 0.3s ease;
+  height: 100vh !important; 
+  pointer-events: none;
+
 }
 
 .container {
@@ -287,6 +288,7 @@ p {
   overflow: hidden;
   transition: opacity 0.3s ease;
   z-index: 10;
+  opacity: 1 !important;
 }
 
 .minimap-wrapper {
