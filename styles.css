@@ -246,20 +246,21 @@ p {
   font-weight: 600;
 }
 
-/* Infinite Scroll Section */
 .infinite-scroll-section {
   position: relative;
   width: 100%;
-  height: 100vh; /* Keep this visible area */
+  height: 100vh; 
   background: #fff;
+  /* Ensure it doesn't collapse */
+  min-height: 100vh;
 }
 
 .container-spacer {
+  /* This must be exactly the same as the section height */
   height: 100vh !important; 
   pointer-events: none;
-
+  display: block;
 }
-
 .container {
   position: relative;
   width: 100%;

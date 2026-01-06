@@ -289,7 +289,6 @@ state.isProcessing = false;
 state.isProcessing = false;
 state.touchStartY = 0;
 state.touchThreshold = 40; // Pixels required to trigger a move
-
 const checkIfInContainer = () => {
   if (!state.containerSection) return false;
   
@@ -300,44 +299,42 @@ const checkIfInContainer = () => {
   const scrollingDown = state.lastDeltaY > 0;
   const scrollingUp = state.lastDeltaY < 0;
 
-  // Thresholds
+  // Thresholds to determine if we are at the very first or very last project
   const atStart = state.targetY >= -5;
   const atEnd = state.targetY <= maxInternalScroll + 5;
 
   if (!state.isStuck) {
-    // 1. ENTERING FROM TOP
+    // 1. ENTERING FROM TOP (Scrolling Down)
+    // If the top of the section reaches the top of the viewport
     if (rect.top <= 10 && rect.top >= -50 && scrollingDown && !atEnd) {
       state.isStuck = true;
-      // Ensure we start at the beginning
-      state.targetY = 0;
+      state.targetY = 0; 
       state.currentY = 0;
       window.scrollTo(0, state.containerOriginalTop);
     } 
-    // 2. ENTERING FROM BOTTOM (This is your issue area)
-    else if (rect.bottom >= viewportHeight - 10 && rect.bottom <= viewportHeight + 150 && scrollingUp && !atStart) {
+    // 2. ENTERING FROM BOTTOM (Scrolling Up)
+    // If the top of the section enters from the bottom of the viewport
+    else if (rect.top <= viewportHeight && rect.top >= viewportHeight - 100 && scrollingUp && !atStart) {
       state.isStuck = true;
       
-      // HARD RESET: If we enter from bottom, we MUST stay at the end.
+      // Lock to the last project so it doesn't jump to the start
       state.targetY = maxInternalScroll;
       state.currentY = maxInternalScroll; 
       
       window.scrollTo(0, state.containerOriginalTop);
     }
   } else {
-    // RELEASE LOGIC: Only release if at boundaries and moving AWAY
+    // RELEASE LOGIC: Only release if at boundaries and moving AWAY from the content
     if (atStart && scrollingUp) {
       state.isStuck = false;
-      state.targetY = 0;
     } else if (atEnd && scrollingDown) {
       state.isStuck = false;
-      state.targetY = maxInternalScroll;
     }
   }
   
   state.isInContainer = state.isStuck || (rect.top < viewportHeight && rect.bottom > 0);
   return state.isStuck;
 };
-
 const moveToNextItem = (direction) => {
   const maxInternalScroll = -((projectData.length - 1) * state.projectHeight);
   let newY = state.targetY - (direction * state.projectHeight);
@@ -542,32 +539,14 @@ const updatePositions = () => {
 const animate = () => {
   const now = Date.now();
   
-  // Always update positions (even when outside container for smooth transitions)
+  // Constantly monitor layout and scroll status
   updateContainerPosition();
   checkIfInContainer();
   
-  // Check if we should release (at end or beginning) - do this early
-  const totalProjectsHeight = projectData.length * state.projectHeight;
   const maxScroll = -((projectData.length - 1) * state.projectHeight);
-  const atEnd = state.targetY <= maxScroll + 5;
-  const atBeginning = state.targetY >= -5;
   
-  // Force release if at boundaries (ensures footer is accessible)
-  // But only release if we're actually trying to scroll past
-  // This prevents premature release
-  if ((atEnd || atBeginning) && state.isStuck) {
-    // Check if we should release based on scroll direction
-    const scrollY = window.scrollY;
-    const containerOriginalTop = state.containerOriginalTop || state.containerTop;
-    
-    // Only release if we're at the boundary AND trying to continue scrolling
-    // This is handled in the event handlers, so we just ensure state is correct here
-    // The actual release with smooth scroll happens in the event handlers
-  }
-  
-  // Ensure container is at correct position when stuck
+  // Ensure container is visually pinned when state.isStuck is true
   if (state.isStuck && state.containerSection) {
-    // Force correct positioning when stuck
     if (state.containerSection.style.position !== 'fixed' || state.containerSection.style.top !== '0px') {
       state.containerSection.style.position = 'fixed';
       state.containerSection.style.top = '0px';
@@ -577,45 +556,52 @@ const animate = () => {
     }
   }
   
-  // Always update positions for smooth transitions
-  // Constrain targetY to valid scroll range (only negative values for scrolling down)
-  // Max scroll allows viewing the last project: (n-1) * height
+  // Constrain targetY to the actual bounds of your project list
   state.targetY = Math.max(maxScroll, Math.min(0, state.targetY));
   
+  // If the user is not interacting with the container, handle smooth exit/idle
   if (!state.isInContainer) {
-    // Don't reset immediately - allow smooth transition
-    // Only reset if we're far from container
-    const rect = state.containerSection?.getBoundingClientRect();
-    if (rect && (rect.bottom < -100 || rect.top > window.innerHeight + 100)) {
-      state.currentY = 0;
-      state.targetY = 0;
-    }
-    // Still update positions even when not in container (for smooth transitions)
-    if (!state.isDragging)
+    // Note: The previous logic that reset targetY to 0 has been removed 
+    // to prevent the jump you experienced when scrolling back up.
+    
+    if (!state.isDragging) {
       state.currentY = lerp(state.currentY, state.targetY, config.LERP_FACTOR);
+    }
+    
     updatePositions();
     requestAnimationFrame(animate);
     return;
   }
   
-  // Container is in view - handle snapping and scrolling
+  // Logic for when the container IS active (in view or stuck)
   if (
     !state.isSnapping &&
     !state.isDragging &&
     now - state.lastScrollTime > 50
   ) {
-    // Snap to nearest project
+    // Snap to the nearest project for a clean UI
     const nearestProject = Math.round(-state.targetY / state.projectHeight);
     const snapPoint = -nearestProject * state.projectHeight;
     
-    if (Math.abs(state.targetY - snapPoint) > 1) snapToProject();
+    if (Math.abs(state.targetY - snapPoint) > 1) {
+      snapToProject();
+    }
   }
   
-  if (state.isSnapping) updateSnap();
-  if (!state.isDragging)
+  // Execute snapping animation if active
+  if (state.isSnapping) {
+    updateSnap();
+  }
+
+  // Apply Lerp for smooth movement
+  if (!state.isDragging) {
     state.currentY = lerp(state.currentY, state.targetY, config.LERP_FACTOR);
+  }
+
+  // Update DOM elements
   syncElements();
   updatePositions();
+  
   requestAnimationFrame(animate);
 };
 animate();
