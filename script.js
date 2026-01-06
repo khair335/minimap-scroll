@@ -39,8 +39,10 @@ const projectData = [
 ];
 
 const config = {
-  SCROLL_SPEED: 1.5,
- LERP_FACTOR : window.innerWidth < 768 ? 0.15 : 0.1,
+// Base speed for wheel/keyboard
+SCROLL_SPEED: window.innerWidth < 768 ? 2.2 : 1.5, 
+// Lower factor = smoother but "laggier", Higher = more responsive
+LERP_FACTOR: window.innerWidth < 768 ? 0.25 : 0.1,
   BUFFER_SIZE: 5,
   MAX_VELOCITY: 250,
   SNAP_DURATION: 350,
@@ -341,11 +343,19 @@ const checkIfInContainer = () => {
     // Also check if footer's bottom is at the bottom of viewport
     const footerSection = document.querySelector('.footer-section');
     let atFooterBottom = false;
-    if (footerSection) {
+  // Inside checkIfInContainer, around line 350:
+if (allProjectsScrolledCheck) {
+  const currentScrollY = window.scrollY;
+  const footerSection = document.querySelector('.footer-section');
+  if (footerSection) {
       const footerRect = footerSection.getBoundingClientRect();
-      // If footer's bottom is at or near the bottom of viewport, we're at footer bottom
-      atFooterBottom = footerRect.bottom >= viewportHeight - 10 && footerRect.bottom <= viewportHeight + 10;
-    }
+      // If the footer is visible and we are scrolling further down, force isInContainer to false
+      if (footerRect.top < window.innerHeight) {
+          state.isInContainer = false;
+          return false;
+      }
+  }
+}
     
     // If at absolute bottom OR at footer bottom, never activate container
     if (atAbsoluteBottom || atFooterBottom) {
@@ -1119,31 +1129,28 @@ window.addEventListener("touchmove", (e) => {
   if (!state.isDragging) return;
 
   const currentTouchY = e.touches[0].clientY;
-  // Calculate how much the finger moved since the last frame
   const deltaY = lastTouchY - currentTouchY; 
   lastTouchY = currentTouchY;
 
-  // Boundaries for the project list
   const maxScroll = -((projectData.length - 1) * state.projectHeight);
   const atBeginning = state.targetY >= -1;
   const atEnd = state.targetY <= maxScroll + 1;
 
-  // If the container is stuck, we intercept the scroll
   if (state.isStuck) {
-    // Only allow native scroll if we are at the very top/bottom and trying to exit
     const tryingToExitTop = atBeginning && deltaY < 0;
     const tryingToExitBottom = atEnd && deltaY > 0;
 
     if (!tryingToExitTop && !tryingToExitBottom) {
-      // INTERNAL SCROLL: Move the project items
       if (e.cancelable) e.preventDefault();
       
-      // Update targetY: Moving finger UP (positive deltaY) should DECREASE targetY (scroll down)
-      state.targetY -= deltaY * config.SCROLL_SPEED; 
+      // INCREASE SENSITIVITY: 
+      // We multiply deltaY to make small finger movements translate to larger scrolls
+      const sensitivity = 2.0; 
+      state.targetY -= deltaY * config.SCROLL_SPEED * sensitivity; 
+      
       state.lastScrollTime = Date.now();
       return;
     } else {
-      // EXIT: Release the container and let the page scroll naturally
       state.isStuck = false;
       state.isDragging = false;
       if (state.containerSection) {
@@ -1154,12 +1161,16 @@ window.addEventListener("touchmove", (e) => {
     }
   }
 
-  // If not stuck yet, check if container hit the top of the screen during this move
+  // RE-ENTRY GUARD: Same as before to prevent jumping back from footer
+  if (atEnd && deltaY > 0) return;
+
   const rect = state.containerSection?.getBoundingClientRect();
-  if (rect && rect.top <= 10 && rect.top >= -10 && !state.isStuck && deltaY > 0) {
-    state.isStuck = true;
-    if (e.cancelable) e.preventDefault();
-    state.targetY -= deltaY * config.SCROLL_SPEED;
+  if (rect && rect.top <= 20 && rect.top >= -20 && !state.isStuck) {
+    if ((deltaY > 0 && !atEnd) || (deltaY < 0 && !atBeginning)) {
+      state.isStuck = true;
+      if (e.cancelable) e.preventDefault();
+      state.targetY -= deltaY * config.SCROLL_SPEED;
+    }
   }
 }, { passive: false });
 
