@@ -297,41 +297,43 @@ const checkIfInContainer = () => {
   const viewportHeight = window.innerHeight;
   const maxInternalScroll = -((projectData.length - 1) * state.projectHeight);
   
-  // Track scroll direction via native window scroll for re-entry
-  const scrollingUp = state.lastDeltaY < 0;
   const scrollingDown = state.lastDeltaY > 0;
+  const scrollingUp = state.lastDeltaY < 0;
 
+  // Thresholds
   const atStart = state.targetY >= -5;
   const atEnd = state.targetY <= maxInternalScroll + 5;
 
   if (!state.isStuck) {
-    // 1. ENTERING FROM TOP (Standard entry)
+    // 1. ENTERING FROM TOP
     if (rect.top <= 10 && rect.top >= -50 && scrollingDown && !atEnd) {
       state.isStuck = true;
+      // Ensure we start at the beginning
+      state.targetY = 0;
+      state.currentY = 0;
       window.scrollTo(0, state.containerOriginalTop);
     } 
-    // 2. ENTERING FROM BOTTOM (This prevents your reset to 0 issue)
+    // 2. ENTERING FROM BOTTOM (This is your issue area)
     else if (rect.bottom >= viewportHeight - 10 && rect.bottom <= viewportHeight + 150 && scrollingUp && !atStart) {
       state.isStuck = true;
       
-      // HARD LOCK: Force the state to the last item immediately
+      // HARD RESET: If we enter from bottom, we MUST stay at the end.
       state.targetY = maxInternalScroll;
       state.currentY = maxInternalScroll; 
       
       window.scrollTo(0, state.containerOriginalTop);
     }
   } else {
-    // RELEASE LOGIC: Finalize values so they don't drift while in footer/header
+    // RELEASE LOGIC: Only release if at boundaries and moving AWAY
     if (atStart && scrollingUp) {
       state.isStuck = false;
-      state.targetY = 0; 
+      state.targetY = 0;
     } else if (atEnd && scrollingDown) {
       state.isStuck = false;
       state.targetY = maxInternalScroll;
     }
   }
   
-  // Update visibility flag for the minimap fade
   state.isInContainer = state.isStuck || (rect.top < viewportHeight && rect.bottom > 0);
   return state.isStuck;
 };
@@ -494,19 +496,19 @@ const updateSnap = () => {
 const updatePositions = () => {
   if (!state.container) return;
 
-  // GUARD: If not stuck and not in view, STOP updating.
-  // This "freezes" the transform values so they don't reset to 0.
+  // PROTECTION: If not stuck, stop calculating new values. 
+  // This freezes the projects at their last known targetY.
   if (!state.isStuck && !state.isInContainer) return;
 
-  // Smoothing calculation
-  const eased = config.LERP_FACTOR || 0.1; 
+  // Smoothing
+  const eased = 0.1; 
   state.currentY += (state.targetY - state.currentY) * eased;
   
   const projectScrollY = state.currentY;
   const minimapRatio = state.minimapHeight / state.projectHeight;
   const minimapY = projectScrollY * minimapRatio;
   
-  // 1. Update Project Items
+  // 1. Update Project List
   state.projects.forEach((item, index) => {
     const y = (index * state.projectHeight) + projectScrollY;
     item.el.style.transform = `translateY(${y}px)`;
@@ -522,7 +524,7 @@ const updatePositions = () => {
     minimap.style.pointerEvents = state.isStuck ? "all" : "none";
   }
   
-  // 3. Update Minimap Images
+  // 3. Update Minimap Items
   state.minimap.forEach((item, index) => {
     const y = (index * state.minimapHeight) + minimapY;
     item.el.style.transform = `translateY(${y}px)`;
@@ -531,7 +533,7 @@ const updatePositions = () => {
     }
   });
   
-  // 4. Update Minimap Text Info
+  // 4. Update Minimap Info
   state.minimapInfo.forEach((item, index) => {
     const y = (index * state.minimapHeight) + minimapY + 40;
     item.el.style.transform = `translateY(${y}px)`;
@@ -679,38 +681,41 @@ window.addEventListener("touchstart", (e) => {
 }, { passive: true });
 
 window.addEventListener("touchmove", (e) => {
-  if (!state.isDragging) return;
+  if (!state.touchStartY) return;
 
-  const currentTouchY = e.touches[0].clientY;
-  const deltaY = lastTouchY - currentTouchY; 
-  lastTouchY = currentTouchY;
-  
-  // Update direction for the visibility check
-  state.lastDeltaY = deltaY;
+  const currentY = e.touches[0].clientY;
+  const diffY = state.touchStartY - currentY; 
+  state.lastDeltaY = diffY;
 
   const isStuckNow = checkIfInContainer();
 
   if (isStuckNow) {
-    const maxScroll = -((projectData.length - 1) * state.projectHeight);
-    const atBeginning = state.targetY >= -5;
-    const atEnd = state.targetY <= maxScroll + 5;
+    const maxInternalScroll = -((projectData.length - 1) * state.projectHeight);
+    
+    // Check boundaries before moving
+    const atStart = state.targetY >= -5;
+    const atEnd = state.targetY <= maxInternalScroll + 5;
 
-    // Release check
-    if ((atEnd && deltaY > 5) || (atBeginning && deltaY < -5)) {
+    // Release if swiping past limits
+    if ((atEnd && diffY > 5) || (atStart && diffY < -5)) {
       state.isStuck = false;
-      return;
+      return; 
     }
 
     if (e.cancelable) e.preventDefault();
-    
-    // Sensitivity adjustment for mobile
-    const sensitivity = 1.8; 
-    state.targetY -= deltaY * config.SCROLL_SPEED * sensitivity; 
-    
-    // Hard Clamp to prevent over-scrolling internal items
-    state.targetY = Math.max(maxScroll, Math.min(0, state.targetY));
-    
-    state.lastScrollTime = Date.now();
+
+    if (!state.isProcessing && Math.abs(diffY) > state.touchThreshold) {
+      state.isProcessing = true;
+      
+      const direction = Math.sign(diffY);
+      const newTarget = state.targetY - (direction * state.projectHeight);
+      
+      // Strict Clamp
+      state.targetY = Math.max(maxInternalScroll, Math.min(0, newTarget));
+      
+      state.touchStartY = currentY; 
+      setTimeout(() => { state.isProcessing = false; }, 400);
+    }
   }
 }, { passive: false });
 
