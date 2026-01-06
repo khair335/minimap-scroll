@@ -324,6 +324,14 @@ p {
   object-fit: contain;
 }
 
+.project img {
+  position: relative;
+  transform: scale(1.5);
+  will-change: transform;
+  object-fit: cover !important;
+}
+
+
 .minimap-info-list {
   position: relative;
   width: 100%;

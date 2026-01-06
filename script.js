@@ -68,6 +68,8 @@ const state = {
   scrollOffset: 0,
   isStuck: false,
   stuckScrollY: 0,
+  lastDeltaY: 0,
+  isProcessing: false,
 };
 
 const lerp = (start, end, factor) => start + (end - start) * factor;
@@ -295,39 +297,41 @@ const checkIfInContainer = () => {
   const viewportHeight = window.innerHeight;
   const maxInternalScroll = -((projectData.length - 1) * state.projectHeight);
   
-  // Use a slightly larger buffer for mobile to ensure the catch happens
+  // Track scroll direction via native window scroll for re-entry
+  const scrollingUp = state.lastDeltaY < 0;
+  const scrollingDown = state.lastDeltaY > 0;
+
   const atStart = state.targetY >= -5;
   const atEnd = state.targetY <= maxInternalScroll + 5;
-  const scrollingDown = state.lastDeltaY > 0;
-  const scrollingUp = state.lastDeltaY < 0;
 
   if (!state.isStuck) {
-    // 1. ENTERING FROM TOP (Heading Down)
+    // 1. ENTERING FROM TOP (Standard entry)
     if (rect.top <= 10 && rect.top >= -50 && scrollingDown && !atEnd) {
       state.isStuck = true;
       window.scrollTo(0, state.containerOriginalTop);
     } 
-    // 2. ENTERING FROM BOTTOM (Heading Up)
-    // We detect if the bottom of the container enters the viewport from below
-    else if (rect.bottom >= viewportHeight - 10 && rect.bottom <= viewportHeight + 100 && scrollingUp && !atStart) {
+    // 2. ENTERING FROM BOTTOM (This prevents your reset to 0 issue)
+    else if (rect.bottom >= viewportHeight - 10 && rect.bottom <= viewportHeight + 150 && scrollingUp && !atStart) {
       state.isStuck = true;
       
-      // FORCE STATE TO LAST ITEM:
-      // This prevents the jump to the first item when coming from the footer
+      // HARD LOCK: Force the state to the last item immediately
       state.targetY = maxInternalScroll;
       state.currentY = maxInternalScroll; 
       
       window.scrollTo(0, state.containerOriginalTop);
     }
   } else {
-    // RELEASE LOGIC: Only release if at the edges AND moving away from the container
+    // RELEASE LOGIC: Finalize values so they don't drift while in footer/header
     if (atStart && scrollingUp) {
       state.isStuck = false;
+      state.targetY = 0; 
     } else if (atEnd && scrollingDown) {
       state.isStuck = false;
+      state.targetY = maxInternalScroll;
     }
   }
   
+  // Update visibility flag for the minimap fade
   state.isInContainer = state.isStuck || (rect.top < viewportHeight && rect.bottom > 0);
   return state.isStuck;
 };
@@ -489,16 +493,20 @@ const updateSnap = () => {
 
 const updatePositions = () => {
   if (!state.container) return;
-  
-  // Smoothing: Move currentY toward targetY by 10% every frame
-  const eased = 0.1; 
+
+  // GUARD: If not stuck and not in view, STOP updating.
+  // This "freezes" the transform values so they don't reset to 0.
+  if (!state.isStuck && !state.isInContainer) return;
+
+  // Smoothing calculation
+  const eased = config.LERP_FACTOR || 0.1; 
   state.currentY += (state.targetY - state.currentY) * eased;
   
   const projectScrollY = state.currentY;
   const minimapRatio = state.minimapHeight / state.projectHeight;
   const minimapY = projectScrollY * minimapRatio;
   
-  // Update main project items
+  // 1. Update Project Items
   state.projects.forEach((item, index) => {
     const y = (index * state.projectHeight) + projectScrollY;
     item.el.style.transform = `translateY(${y}px)`;
@@ -507,14 +515,14 @@ const updatePositions = () => {
     }
   });
   
-  // Update Minimap container visibility
+  // 2. Update Minimap UI
   const minimap = document.querySelector(".minimap");
   if (minimap) {
     minimap.style.opacity = state.isInContainer ? "1" : "0";
     minimap.style.pointerEvents = state.isStuck ? "all" : "none";
   }
   
-  // Update Minimap image items
+  // 3. Update Minimap Images
   state.minimap.forEach((item, index) => {
     const y = (index * state.minimapHeight) + minimapY;
     item.el.style.transform = `translateY(${y}px)`;
@@ -523,13 +531,12 @@ const updatePositions = () => {
     }
   });
   
-  // Update Minimap text info
+  // 4. Update Minimap Text Info
   state.minimapInfo.forEach((item, index) => {
     const y = (index * state.minimapHeight) + minimapY + 40;
     item.el.style.transform = `translateY(${y}px)`;
   });
 };
-
 const animate = () => {
   const now = Date.now();
   
@@ -672,45 +679,38 @@ window.addEventListener("touchstart", (e) => {
 }, { passive: true });
 
 window.addEventListener("touchmove", (e) => {
-  const currentY = e.touches[0].clientY;
-  const diffY = state.touchStartY - currentY; // positive = swipe up (scroll down)
-  state.lastDeltaY = diffY;
+  if (!state.isDragging) return;
 
-  // We check if we should be stuck before preventing default behavior
-  const stuck = checkIfInContainer();
+  const currentTouchY = e.touches[0].clientY;
+  const deltaY = lastTouchY - currentTouchY; 
+  lastTouchY = currentTouchY;
+  
+  // Update direction for the visibility check
+  state.lastDeltaY = deltaY;
 
-  if (stuck) {
-    const maxInternalScroll = -((projectData.length - 1) * state.projectHeight);
-    const atStart = state.targetY >= -5;
-    const atEnd = state.targetY <= maxInternalScroll + 5;
+  const isStuckNow = checkIfInContainer();
 
-    // RELEASE CHECK: If user is at the end and swipes up, or start and swipes down, 
-    // we let the browser take over the scroll to show footer/header.
-    if ((atEnd && diffY > 5) || (atStart && diffY < -5)) {
+  if (isStuckNow) {
+    const maxScroll = -((projectData.length - 1) * state.projectHeight);
+    const atBeginning = state.targetY >= -5;
+    const atEnd = state.targetY <= maxScroll + 5;
+
+    // Release check
+    if ((atEnd && deltaY > 5) || (atBeginning && deltaY < -5)) {
       state.isStuck = false;
-      return; 
+      return;
     }
 
-    // LOCK: Prevent the background page from moving
     if (e.cancelable) e.preventDefault();
-
-    // STEP LOGIC: Trigger one item move per swipe gesture
-    if (!state.isProcessing && Math.abs(diffY) > state.touchThreshold) {
-      state.isProcessing = true;
-      
-      const direction = Math.sign(diffY);
-      const newTarget = state.targetY - (direction * state.projectHeight);
-      
-      // Keep it strictly within the bounds of the project list
-      state.targetY = Math.max(maxInternalScroll, Math.min(0, newTarget));
-      
-      state.lastScrollTime = Date.now();
-      state.touchStartY = currentY; // Reset pivot to allow continuous long swipes
-
-      setTimeout(() => {
-        state.isProcessing = false;
-      }, 400); // Wait for animation to finish
-    }
+    
+    // Sensitivity adjustment for mobile
+    const sensitivity = 1.8; 
+    state.targetY -= deltaY * config.SCROLL_SPEED * sensitivity; 
+    
+    // Hard Clamp to prevent over-scrolling internal items
+    state.targetY = Math.max(maxScroll, Math.min(0, state.targetY));
+    
+    state.lastScrollTime = Date.now();
   }
 }, { passive: false });
 
